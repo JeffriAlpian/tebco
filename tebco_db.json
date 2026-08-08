@@ -1,0 +1,26 @@
+{
+  "devices": {},
+  "patients": {
+    "P-003": {
+      "name": "Budi Santoso",
+      "disease": "Hipertensi",
+      "wa_number": "628123456789",
+      "gender": "male",
+      "age": 45
+    }
+  },
+  "schedules": {
+    "P-003": {
+      "sched_1": {
+        "time": "08:00",
+        "quantity": 2,
+        "status": "Pending"
+      },
+      "sched_2": {
+        "time": "20:00",
+        "quantity": 1,
+        "status": "Pending"
+      }
+    }
+  }
+}

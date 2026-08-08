@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TEBCO - Hardware Simulator</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --bg: #0f172a;
+            --card: #1e293b;
+            --text: #f8fafc;
+            --error: #ef4444;
+            --success: #10b981;
+        }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background-color: var(--card);
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+            width: 100%;
+            max-width: 450px;
+        }
+        h1 { margin-top: 0; font-size: 1.5rem; text-align: center; }
+        .form-group { margin-bottom: 1rem; }
+        label { display: block; margin-bottom: 0.5rem; font-size: 0.875rem; color: #94a3b8; }
+        input {
+            width: 100%; padding: 0.75rem;
+            background: #0f172a; border: 1px solid #334155;
+            color: white; border-radius: 0.5rem; box-sizing: border-box;
+        }
+        button {
+            width: 100%; padding: 1rem;
+            background-color: var(--primary);
+            color: white; border: none; border-radius: 0.5rem;
+            font-size: 1rem; font-weight: bold; cursor: pointer;
+            transition: all 0.2s; margin-top: 1rem;
+        }
+        button:hover { background-color: var(--primary-hover); }
+        button:active { transform: scale(0.98); }
+        button.recording {
+            background-color: var(--error);
+            animation: pulse 1.5s infinite;
+        }
+        #status {
+            text-align: center; margin-top: 1rem; font-size: 0.875rem; min-height: 1.2rem;
+        }
+        #player { width: 100%; margin-top: 1rem; display: none; }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🎙️ TEBCO Web Simulator</h1>
+    <p style="font-size: 0.875rem; color: #94a3b8; text-align: center; margin-bottom: 2rem;">
+        Gunakan aplikasi ini untuk menyimulasikan alat ESP32. Alat ini merekam PCM 16kHz dan memanggil Webhook n8n Anda.
+    </p>
+
+    <div class="form-group">
+        <label>Webhook URL (Gunakan /webhook-test/ untuk testing)</label>
+        <input type="text" id="url" value="https://n8n.jeffrialpian.my.id/webhook-test/tebco-voice-query">
+    </div>
+    
+    <div class="form-group">
+        <label>Secret Token (Sama dengan config.h)</label>
+        <input type="text" id="secret" value="rahasia-tebco-123">
+    </div>
+
+    <button id="recordBtn">Tahan untuk Berbicara</button>
+    <div id="status">Siap digunakan.</div>
+
+    <audio id="player" controls autoplay></audio>
+</div>
+
+<script>
+    const recordBtn = document.getElementById('recordBtn');
+    const statusTxt = document.getElementById('status');
+    const player = document.getElementById('player');
+    
+    let audioContext, processor, input, globalStream;
+    let pcmData = [];
+
+    // Mencegah klik kanan menu pada tombol
+    recordBtn.addEventListener('contextmenu', e => e.preventDefault());
+
+    // Event listeners untuk Mouse dan Touch (HP)
+    recordBtn.addEventListener('mousedown', startRecording);
+    recordBtn.addEventListener('touchstart', startRecording, {passive: false});
+    
+    window.addEventListener('mouseup', stopRecordingAndSend);
+    window.addEventListener('touchend', stopRecordingAndSend);
+
+    async function startRecording(e) {
+        if(e && e.type === 'touchstart') e.preventDefault();
+        
+        try {
+            pcmData = [];
+            globalStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            // Paksa sample rate 16000Hz (seperti MAX98357A/INMP441)
+            audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+            input = audioContext.createMediaStreamSource(globalStream);
+            
+            processor = audioContext.createScriptProcessor(4096, 1, 1);
+            processor.onaudioprocess = (e) => {
+                const float32Array = e.inputBuffer.getChannelData(0);
+                // Konversi Float32 ke Int16 (Raw PCM)
+                for (let i = 0; i < float32Array.length; i++) {
+                    let s = Math.max(-1, Math.min(1, float32Array[i]));
+                    pcmData.push(s < 0 ? s * 0x8000 : s * 0x7FFF);
+                }
+            };
+            
+            input.connect(processor);
+            processor.connect(audioContext.destination);
+            
+            recordBtn.textContent = "Merekam... Lepas untuk kirim";
+            recordBtn.classList.add('recording');
+            statusTxt.textContent = "Merekam suara Anda...";
+            statusTxt.style.color = "var(--text)";
+            player.style.display = 'none';
+
+        } catch (err) {
+            alert("Gagal mengakses mikrofon: " + err.message);
+        }
+    }
+
+    async function stopRecordingAndSend(e) {
+        if (!processor) return; // Belum merekam
+
+        recordBtn.textContent = "Memproses...";
+        recordBtn.classList.remove('recording');
+        statusTxt.textContent = "Mengonversi ke Base64...";
+
+        processor.disconnect();
+        input.disconnect();
+        globalStream.getTracks().forEach(t => t.stop());
+        processor = null;
+
+        if (pcmData.length === 0) {
+            statusTxt.textContent = "Rekaman kosong.";
+            recordBtn.textContent = "Tahan untuk Berbicara";
+            return;
+        }
+
+        // Konversi Array ke Base64
+        const buffer = new Int16Array(pcmData);
+        const uint8Buffer = new Uint8Array(buffer.buffer);
+        let binary = '';
+        // Hindari Maximum call stack size exceeded dengan chunking
+        const chunkSize = 8192;
+        for (let i = 0; i < uint8Buffer.length; i += chunkSize) {
+            const chunk = uint8Buffer.subarray(i, i + chunkSize);
+            binary += String.fromCharCode.apply(null, chunk);
+        }
+        const base64Audio = window.btoa(binary);
+
+        await sendToN8n(base64Audio);
+    }
+
+    async function sendToN8n(base64Audio) {
+        statusTxt.textContent = "Mengirim ke n8n...";
+        const url = document.getElementById('url').value;
+        const secret = document.getElementById('secret').value;
+
+        const payload = {
+            audio_base64: base64Audio,
+            sample_rate: 16000,
+            encoding: "LINEAR16",
+            language: "id-ID",
+            user_greeting: "Pak Budi",
+            disease: "Hipertensi"
+        };
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + secret
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
+            }
+
+            // Menerima balasan berupa Binary Audio (PCM/WAV)
+            statusTxt.textContent = "Menerima audio balasan...";
+            const blob = await response.blob();
+            
+            if (blob.size < 100) {
+                statusTxt.textContent = "Audio kosong/gagal dari n8n.";
+                statusTxt.style.color = "var(--error)";
+            } else {
+                statusTxt.textContent = "Berhasil! Memutar audio...";
+                statusTxt.style.color = "var(--success)";
+                
+                const audioUrl = URL.createObjectURL(blob);
+                player.src = audioUrl;
+                player.style.display = 'block';
+                player.play();
+            }
+        } catch (err) {
+            statusTxt.textContent = "Gagal: " + err.message;
+            statusTxt.style.color = "var(--error)";
+        } finally {
+            recordBtn.textContent = "Tahan untuk Berbicara";
+        }
+    }
+</script>
+
+</body>
+</html>

@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TEBCO Hospital Command Center</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/@phosphor-icons/web"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          display: ['Poppins', 'sans-serif'],
+          mono: ['IBM Plex Mono', 'monospace'],
+        },
+        colors: {
+          teal: { 50:'#eefcfb',100:'#d4f6f2',300:'#7fe0d3',500:'#14b8a6',600:'#0d9488',700:'#0f766e',900:'#0b3b36' },
+          ink: { 900:'#0f172a', 700:'#334155', 500:'#64748b', 300:'#94a3b8' },
+          orbblue: '#60a5fa',
+          orbpurple: '#a78bfa',
+        },
+        boxShadow: {
+          glass: '0 8px 32px rgba(15, 118, 110, 0.10)',
+        }
+      }
+    }
+  }
+</script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="font-display text-ink-900 antialiased">
+
+  <!-- ================= BACKGROUND ================= -->
+  <div class="bg-effects">
+    <div class="glow-orb orb-1"></div>
+    <div class="glow-orb orb-2"></div>
+    <div class="glow-orb orb-3"></div>
+  </div>
+
+  <!-- ================= LOGIN SCREEN ================= -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-card glass-panel">
+      <div class="flex flex-col items-center gap-2 mb-8">
+        <div class="login-logo">
+          <i class="ph-fill ph-first-aid-kit"></i>
+        </div>
+        <h1 class="text-xl font-semibold tracking-tight">TEBCO Command Center</h1>
+        <p class="text-sm text-ink-500 text-center">Masuk untuk memantau perangkat &amp; jadwal pasien secara real-time</p>
+      </div>
+      <form id="login-form" class="flex flex-col gap-4">
+        <div class="form-group">
+          <label for="login-username">Username</label>
+          <div class="input-wrap">
+            <i class="ph ph-user"></i>
+            <input id="login-username" type="text" autocomplete="username" placeholder="admin" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="login-password">Password</label>
+          <div class="input-wrap">
+            <i class="ph ph-lock-key"></i>
+            <input id="login-password" type="password" autocomplete="current-password" placeholder="••••••••" required>
+          </div>
+        </div>
+        <p id="login-error" class="login-error hidden"><i class="ph ph-warning-circle"></i> Username atau password salah.</p>
+        <button type="submit" class="btn-primary w-full justify-center py-3 mt-2">
+          <i class="ph ph-sign-in"></i> Masuk Dashboard
+        </button>
+        <p class="text-xs text-ink-300 text-center mt-1">Demo access &middot; admin / tebco2026</p>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= APP SHELL ================= -->
+  <div id="app-shell" class="app-shell hidden">
+
+    <nav class="sidebar">
+      <div class="brand">
+        <div class="brand-icon"><i class="ph-fill ph-first-aid-kit"></i></div>
+        <span>TEBCO Admin</span>
+      </div>
+
+      <ul class="nav-links">
+        <li class="nav-item active" data-section="dashboard">
+          <i class="ph ph-squares-four"></i> Dashboard
+        </li>
+        <li class="nav-item" data-section="devices">
+          <i class="ph ph-devices"></i> Devices
+        </li>
+        <li class="nav-item" data-section="patients">
+          <i class="ph ph-users"></i> Patients
+        </li>
+        <li class="nav-item" data-section="schedules">
+          <i class="ph ph-calendar-check"></i> Schedules
+        </li>
+      </ul>
+
+      <div class="sidebar-footer">
+        <div class="user-chip">
+          <div class="user-avatar"><i class="ph ph-user"></i></div>
+          <div>
+            <p class="text-sm font-medium leading-tight" id="user-name-label">Admin</p>
+            <p class="text-xs text-ink-300 leading-tight">Perawat / Admin</p>
+          </div>
+        </div>
+        <button id="logout-btn" class="logout-btn">
+          <i class="ph ph-sign-out"></i> Keluar
+        </button>
+      </div>
+    </nav>
+
+    <main class="content">
+      <header>
+        <div>
+          <h1 id="page-title">Hospital Command Center</h1>
+          <p id="page-subtitle">Real-time TEBCO Smart Dispenser Monitoring</p>
+        </div>
+        <div class="status-indicator">
+          <span class="pulse"></span> Live Sync Active
+        </div>
+      </header>
+
+      <!-- ===== DASHBOARD SECTION ===== -->
+      <div class="view" id="view-dashboard">
+        <div class="grid-container">
+
+          <section class="glass-panel" id="devices-panel">
+            <div class="panel-header">
+              <h2><i class="ph ph-devices"></i> Active Devices</h2>
+              <span class="text-xs text-ink-300 hidden md:inline">Klik <i class="ph ph-link-simple"></i> untuk pasangkan pasien</span>
+            </div>
+            <div class="scroll-container" id="devices-list">
+              <div class="loading">Fetching devices...</div>
+            </div>
+          </section>
+
+          <section class="glass-panel" id="patients-panel">
+            <div class="panel-header">
+              <h2><i class="ph ph-users"></i> Registered Patients</h2>
+              <button class="btn-primary" onclick="openPatientModal()">
+                <i class="ph ph-user-plus"></i> Daftar Pasien
+              </button>
+            </div>
+            <div class="scroll-container" id="patients-list">
+              <div class="loading">Fetching patients...</div>
+            </div>
+          </section>
+
+          <section class="glass-panel span-full" id="battery-panel">
+            <div class="panel-header">
+              <h2><i class="ph ph-battery-charging"></i> Battery Health Overview</h2>
+              <span class="text-xs text-ink-300">Diperbarui otomatis setiap 5 detik</span>
+            </div>
+            <div class="chart-wrap">
+              <canvas id="battery-chart"></canvas>
+            </div>
+          </section>
+
+          <section class="glass-panel span-full" id="schedules-panel-dash">
+            <div class="panel-header">
+              <h2><i class="ph ph-calendar-check"></i> Medication Schedules</h2>
+              <button class="btn-primary" onclick="openModal('schedule-modal')">
+                <i class="ph ph-plus"></i> Add Schedule
+              </button>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Patient ID</th><th>Time</th><th>Obat A</th><th>Obat B</th><th>Status</th><th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="schedules-list">
+                  <tr><td colspan="6" class="text-center loading">Fetching schedules...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+        </div>
+      </div>
+
+      <!-- ===== DEVICES SECTION ===== -->
+      <div class="view hidden" id="view-devices">
+        <section class="glass-panel">
+          <div class="panel-header">
+            <h2><i class="ph ph-devices"></i> All Devices</h2>
+            <span class="text-xs text-ink-300">Klik <i class="ph ph-link-simple"></i> pada kartu untuk pasangkan pasien ke alat</span>
+          </div>
+          <div class="cards-grid" id="devices-list-full">
+            <div class="loading">Fetching devices...</div>
+          </div>
+        </section>
+        <section class="glass-panel mt-6">
+          <div class="panel-header">
+            <h2><i class="ph ph-battery-charging"></i> Battery Health Overview</h2>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="battery-chart-full"></canvas>
+          </div>
+        </section>
+      </div>
+
+      <!-- ===== PATIENTS SECTION ===== -->
+      <div class="view hidden" id="view-patients">
+        <section class="glass-panel">
+          <div class="panel-header">
+            <h2><i class="ph ph-users"></i> Registered Patients</h2>
+            <button class="btn-primary" onclick="openPatientModal()">
+              <i class="ph ph-user-plus"></i> Daftar Pasien Baru
+            </button>
+          </div>
+          <div class="cards-grid" id="patients-list-full">
+            <div class="loading">Fetching patients...</div>
+          </div>
+        </section>
+      </div>
+
+      <!-- ===== SCHEDULES SECTION ===== -->
+      <div class="view hidden" id="view-schedules">
+        <section class="glass-panel">
+          <div class="panel-header">
+            <h2><i class="ph ph-calendar-check"></i> Medication Schedules</h2>
+            <button class="btn-primary" onclick="openModal('schedule-modal')">
+              <i class="ph ph-plus"></i> Add Schedule
+            </button>
+          </div>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Patient ID</th><th>Time</th><th>Obat A</th><th>Obat B</th><th>Status</th><th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="schedules-list-full">
+                <tr><td colspan="6" class="text-center loading">Fetching schedules...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ================= MODAL FORM ================= -->
+  <div class="modal-overlay" id="schedule-modal">
+    <div class="modal-content glass-panel">
+      <div class="modal-header">
+        <h3>Create/Edit Schedule</h3>
+        <button class="btn-close" onclick="closeModal('schedule-modal')"><i class="ph ph-x"></i></button>
+      </div>
+      <form id="schedule-form">
+        <input type="hidden" id="edit-schedule-id">
+        <div class="form-group">
+          <label for="form-patient-id">Patient ID</label>
+          <select id="form-patient-id" required></select>
+        </div>
+        <div class="form-group">
+          <label for="form-time">Time (HH:MM)</label>
+          <input type="time" id="form-time" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="form-qty1">Obat A Qty</label>
+            <input type="number" id="form-qty1" min="0" value="1" required>
+          </div>
+          <div class="form-group">
+            <label for="form-qty2">Obat B Qty</label>
+            <input type="number" id="form-qty2" min="0" value="0" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="form-status">Status</label>
+          <select id="form-status" required>
+            <option value="Pending">Pending</option>
+            <option value="Tuntas">Tuntas</option>
+            <option value="Bolos">Bolos</option>
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn-secondary" onclick="closeModal('schedule-modal')">Cancel</button>
+          <button type="submit" class="btn-primary">Save Schedule</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= PATIENT MODAL FORM ================= -->
+  <div class="modal-overlay" id="patient-modal">
+    <div class="modal-content glass-panel">
+      <div class="modal-header">
+        <h3 id="patient-modal-title">Daftarkan Pasien Baru</h3>
+        <button class="btn-close" onclick="closeModal('patient-modal')"><i class="ph ph-x"></i></button>
+      </div>
+      <form id="patient-form">
+        <input type="hidden" id="edit-patient-id">
+        <div class="form-group">
+          <label for="form-patient-new-id">Patient ID</label>
+          <input id="form-patient-new-id" type="text" placeholder="P-004" required>
+        </div>
+        <div class="form-group">
+          <label for="form-patient-name">Nama Lengkap</label>
+          <input id="form-patient-name" type="text" placeholder="Nama pasien" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="form-patient-age">Umur</label>
+            <input id="form-patient-age" type="number" min="0" placeholder="45" required>
+          </div>
+          <div class="form-group">
+            <label for="form-patient-gender">Jenis Kelamin</label>
+            <select id="form-patient-gender" required>
+              <option value="male">Laki-laki</option>
+              <option value="female">Perempuan</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="form-patient-disease">Diagnosa / Penyakit</label>
+          <input id="form-patient-disease" type="text" placeholder="TBC Kategori 1" required>
+        </div>
+        <div class="form-group">
+          <label for="form-patient-wa">Nomor WhatsApp</label>
+          <input id="form-patient-wa" type="tel" placeholder="628123456789" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="form-patient-stock1">Stok Obat A</label>
+            <input id="form-patient-stock1" type="number" min="0" placeholder="0" value="0">
+          </div>
+          <div class="form-group">
+            <label for="form-patient-stock2">Stok Obat B</label>
+            <input id="form-patient-stock2" type="number" min="0" placeholder="0" value="0">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="form-patient-threshold">Threshold (Batas Minimal Stok)</label>
+          <input id="form-patient-threshold" type="number" min="0" placeholder="5" value="5">
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn-secondary" onclick="closeModal('patient-modal')">Batal</button>
+          <button type="submit" class="btn-primary">Simpan Pasien</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= ASSIGN PATIENT TO DEVICE MODAL ================= -->
+  <div class="modal-overlay" id="assign-modal">
+    <div class="modal-content glass-panel">
+      <div class="modal-header">
+        <h3>Pasangkan Pasien ke Alat</h3>
+        <button class="btn-close" onclick="closeModal('assign-modal')"><i class="ph ph-x"></i></button>
+      </div>
+      <form id="assign-form">
+        <input type="hidden" id="assign-device-id">
+        <div class="form-group">
+          <label>Alat</label>
+          <div class="input-wrap" style="padding:10px 12px;">
+            <i class="ph ph-devices"></i>
+            <span id="assign-device-label" class="text-sm font-medium">-</span>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="assign-patient-select">Pilih Pasien</label>
+          <select id="assign-patient-select">
+            <option value="">-- Tidak ada (lepas pasangan) --</option>
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn-secondary" onclick="closeModal('assign-modal')">Batal</button>
+          <button type="submit" class="btn-primary">Simpan Pasangan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
