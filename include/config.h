@@ -74,8 +74,8 @@
 // --- I2S DAC/Amp MAX98357A (I2S port 1) ---
 // PERBAIKAN: BCLK dipindah GPIO3 (strapping pin!) -> GPIO6
 // Colok: BCLK->6, LRC->7, DIN->16, SD(shutdown/enable)->4
-#define PIN_SPK_BCLK        6
-#define PIN_SPK_LRCK        7
+#define PIN_SPK_BCLK        7
+#define PIN_SPK_LRCK        6
 #define PIN_SPK_DIN        16
 #define PIN_SPK_SD          4
 
