@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  tebco-backend:
+    build: .
+    container_name: tebco-backend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    # Membaca environment variables dari file .env di direktori yang sama
+    env_file:
+      - .env

@@ -1,7 +1,8 @@
 // wake_word.cpp
 #include "../include/wake_word.h"
 #include "../include/config.h"
-#include <jeffrialpian-project-1_inferencing.h>
+// #include <jeffrialpian-project-1_inferencing.h>
+#include <Audio_Classification_-_Keyword_Spotting_TEBCO__inferencing.h>
 
 static int16_t *audio_buffer = nullptr;
 
@@ -33,6 +34,15 @@ bool WakeWordEngine::begin()
     run_classifier_init();
     _ready = true;
     return true;
+}
+
+void WakeWordEngine::reset()
+{
+    if (!_ready) return;
+    _consecutiveHits = 0;
+    _speechActive = false;
+    _lastConfidence = 0.0f;
+    run_classifier_init();
 }
 
 bool WakeWordEngine::check()

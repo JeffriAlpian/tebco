@@ -196,6 +196,10 @@ void WiFiManager::saveCredentials(const String &ssid, const String &pass) {
 
 bool WiFiManager::connectSTA(const String &ssid, const String &pass) {
     WiFi.mode(WIFI_STA);
+    // Kurangi daya transmisi Wi-Fi untuk mencegah Brownout (Tegangan drop)
+    // Default ESP32 adalah 20dBm (sangat boros daya). Kita turunkan ke 8.5dBm.
+    WiFi.setTxPower(WIFI_POWER_8_5dBm);
+    
     WiFi.begin(ssid.c_str(), pass.c_str());
 
     Serial.printf("[WiFi] Connecting to %s", ssid.c_str());
@@ -215,6 +219,10 @@ bool WiFiManager::connectSTA(const String &ssid, const String &pass) {
 void WiFiManager::startAP() {
     WiFi.mode(WIFI_AP);
     WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASS);
+    
+    // Kurangi daya AP juga untuk mencegah brownout
+    WiFi.setTxPower(WIFI_POWER_8_5dBm);
+    
     Serial.printf("[WiFi] AP started. SSID: %s, IP: %s\n",
                   WIFI_AP_SSID, WiFi.softAPIP().toString().c_str());
 

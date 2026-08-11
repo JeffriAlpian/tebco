@@ -9,6 +9,7 @@
 #include <ArduinoJson.h>
 #include <base64.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 
 AIAssistant::AIAssistant(AudioPipeline &audio, DisplayManager &display)
     : _audio(audio), _display(display) {}
@@ -52,6 +53,7 @@ void AIAssistant::handleVoiceQuery(const String &patientId, const String &userGr
         }
 
         // ── 2. Perekaman VAD ────────────────────────────────────────────────
+        _display.setListeningMode(true);   // Cegah auto-revert ekspresi
         _display.showListeningEyes();
         Serial.println("\n[AI] Mode Mendengarkan Aktif (VAD)...");
 
@@ -68,59 +70,54 @@ void AIAssistant::handleVoiceQuery(const String &patientId, const String &userGr
         // Rekam dengan VAD:
         // - Silence Timeout: 1000ms (Auto-stop 1 detik setelah selesai bicara)
         // - Initial Timeout: 3000ms (Standby jika tidak ada suara dalam 3 detik)
-        size_t recorded = _audio.recordVAD(pcmBuf, maxBufSize, 1000, 3000);
+        // - tickCallback: update animasi display setiap chunk agar tidak blank
+        DisplayManager &disp = _display;
+        size_t recorded = _audio.recordVAD(pcmBuf, maxBufSize, 1000, 3000,
+                                           [&disp]() { disp.update(); });
 
         // JIKA TIDAK ADA SUARA DALAM 3 DETIK PERTAMA -> KELUAR LOOP (STANDBY)
         if (recorded == 0)
         {
             free(pcmBuf);
+            _display.setListeningMode(false);  // Kembalikan mode normal
             Serial.println("[AI] Tidak ada respon dalam 3 detik. Kembali ke Mode Standby.");
             _display.setExpression(FaceExpression::NEUTRAL);
             continuousMode = false;
             break;
         }
 
+        _display.setListeningMode(false);  // VAD selesai, kembalikan mode normal
+
         Serial.printf("[AI] Terekam %zu byte PCM.\n", recorded);
 
-        // ── 3. Base64 Encoding ──────────────────────────────────────────────
+        // ── 3. HTTP POST Request ke n8n (Binary) ────────────────────────────
         _display.showProcessingEyes();
-        Serial.println("[AI] Encoding audio ke Base64...");
-
-        String b64 = base64::encode((uint8_t *)pcmBuf, recorded);
-        free(pcmBuf); // Bebaskan buffer PCM secepat mungkin
-
-        if (b64.length() == 0)
-        {
-            _display.showAIResponse("Encoding gagal.");
-            break;
-        }
-
-        // ── 4. Konstruksi Payload JSON ──────────────────────────────────────
-        String payload;
-        payload.reserve(b64.length() + 256);
-        payload = "{";
-        payload += "\"audio_base64\":\"" + b64 + "\",";
-        payload += "\"sample_rate\":" + String(I2S_SAMPLE_RATE) + ",";
-        payload += "\"encoding\":\"LINEAR16\",";
-        payload += "\"language\":\"id-ID\",";
-        payload += "\"patient_id\":\"" + jsonEscape(patientId) + "\",";
-        payload += "\"user_greeting\":\"" + jsonEscape(userGreeting) + "\",";
-        payload += "\"disease\":\"" + jsonEscape(disease) + "\"";
-        payload += "}";
-
-        b64 = String(); // Free Base64 String memory
-
-        // ── 5. HTTP POST Request ke n8n ────────────────────────────────────
-        Serial.println("[AI] Mengirim data ke n8n Webhook...");
+        Serial.println("[AI] Mengirim data audio binary ke n8n Webhook...");
+        
+        WiFiClientSecure client;
+        client.setInsecure(); // Abaikan verifikasi sertifikat SSL
+        
         HTTPClient http;
-        http.begin(AI_VOICE_QUERY_URL);
-        http.addHeader("Content-Type", "application/json");
+        http.begin(client, AI_VOICE_QUERY_URL);
+        
+        // Header untuk file binary
+        http.addHeader("Content-Type", "application/octet-stream");
         http.addHeader("Authorization", String("Bearer ") + AI_WEBHOOK_SECRET);
+        
+        // Header metadata custom (akan ditangkap oleh webhook n8n sebagai header)
+        http.addHeader("X-Patient-Id", patientId);
+        // Clean newlines just in case
+        String cleanGreeting = userGreeting; cleanGreeting.replace("\n", " "); cleanGreeting.replace("\r", "");
+        http.addHeader("X-User-Greeting", cleanGreeting);
+        String cleanDisease = disease; cleanDisease.replace("\n", " "); cleanDisease.replace("\r", "");
+        http.addHeader("X-Disease", cleanDisease);
+        http.addHeader("X-Sample-Rate", String(I2S_SAMPLE_RATE));
+        
         http.addHeader("Connection", "close");
         http.setTimeout(60000); // 60s timeout untuk LLM
 
-        int code = http.POST(payload);
-        payload = String(); // Free payload memory
+        int code = http.POST((uint8_t *)pcmBuf, recorded);
+        free(pcmBuf); // Bebaskan buffer PCM setelah terkirim
 
         if (code != HTTP_CODE_OK)
         {
@@ -235,10 +232,7 @@ void AIAssistant::handleVoiceQuery(const String &patientId, const String &userGr
 
         // ── 8. Jeda Singkat & Loop Kembali ke Listening Mode ─────────────────
         delay(500); // naikkan dari 300ms
-        // Buang beberapa frame pertama biar transient/pop dari speaker tidak ikut terbaca
-        int16_t flushBuf[512];
-        for (int i = 0; i < 5; i++)
-            _audio.readFrame(flushBuf, 512);
+        // Frame flush sekarang ditangani oleh wakeWord.reset() setelah voice query selesai
             
         Serial.println("[AI] Selesai berbicara. Otomatis mendengarkan kembali...");
         // Perulangan 'while (continuousMode)' akan berulang ke atas

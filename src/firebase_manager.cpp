@@ -45,7 +45,7 @@ String FirebaseManager::buildAuthURL(const String &path) {
 String FirebaseManager::httpGET(const String &url) {
     HTTPClient http;
     http.begin(url);
-    http.setTimeout(8000);
+    http.setTimeout(3000); // Harus di bawah 5000ms agar ESP32 Task Watchdog tidak reset (Panic)
     int code = http.GET();
     String body = "";
     if (code == HTTP_CODE_OK) {
@@ -61,7 +61,7 @@ bool FirebaseManager::httpPATCH(const String &url, const String &payload) {
     HTTPClient http;
     http.begin(url);
     http.addHeader("Content-Type", "application/json");
-    http.setTimeout(8000);
+    http.setTimeout(3000); // Harus di bawah 5000ms
     int code = http.sendRequest("PATCH", payload);
     bool ok = (code == HTTP_CODE_OK);
     if (!ok) Serial.printf("[Firebase] PATCH failed, HTTP %d\n", code);
@@ -73,7 +73,7 @@ bool FirebaseManager::httpPUT(const String &url, const String &payload) {
     HTTPClient http;
     http.begin(url);
     http.addHeader("Content-Type", "application/json");
-    http.setTimeout(8000);
+    http.setTimeout(3000); // Harus di bawah 5000ms
     int code = http.PUT(payload);
     bool ok = (code == HTTP_CODE_OK);
     if (!ok) Serial.printf("[Firebase] PUT failed, HTTP %d\n", code);

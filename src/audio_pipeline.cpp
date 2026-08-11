@@ -91,7 +91,8 @@ size_t AudioPipeline::readFrame(int16_t *frameBuffer, size_t num_samples) {
     }
     if (!rawBuf) return 0;
 
-    esp_err_t err = i2s_channel_read(_mic_rx_chan, rawBuf, toReadBytes, &bytesRead, portMAX_DELAY);
+    // Timeout 100ms agar tidak freeze permanen jika mic I2S bermasalah
+    esp_err_t err = i2s_channel_read(_mic_rx_chan, rawBuf, toReadBytes, &bytesRead, pdMS_TO_TICKS(100));
     if (err != ESP_OK) return 0;
 
     size_t samplesRead = bytesRead / sizeof(int32_t);
@@ -114,7 +115,8 @@ size_t AudioPipeline::record(int16_t *outBuffer, size_t bufSize, uint8_t duratio
         size_t remaining32 = remaining16 * 2;
         size_t toRead = min((size_t)(CHUNK * sizeof(int32_t)), remaining32);
         
-        esp_err_t err = i2s_channel_read(_mic_rx_chan, rawBuf, toRead, &bytesRead, portMAX_DELAY);
+        // Timeout 100ms agar tidak freeze permanen jika mic I2S bermasalah
+        esp_err_t err = i2s_channel_read(_mic_rx_chan, rawBuf, toRead, &bytesRead, pdMS_TO_TICKS(100));
         if (err != ESP_OK) break;
 
         size_t samples = bytesRead / sizeof(int32_t);
@@ -127,7 +129,8 @@ size_t AudioPipeline::record(int16_t *outBuffer, size_t bufSize, uint8_t duratio
 }
 
 size_t AudioPipeline::recordVAD(int16_t *outBuffer, size_t maxBufSize,
-                                 uint16_t silenceTimeoutMs, uint16_t initialTimeoutMs) {
+                                 uint16_t silenceTimeoutMs, uint16_t initialTimeoutMs,
+                                 std::function<void()> tickCallback) {
     if (!_mic_rx_chan) return 0;
 
     const size_t CHUNK_SAMPLES = 512;
@@ -144,7 +147,14 @@ size_t AudioPipeline::recordVAD(int16_t *outBuffer, size_t maxBufSize,
 
     while ((totalRecordedBytes + (CHUNK_SAMPLES * sizeof(int16_t))) <= maxBufSize) {
         size_t samplesRead = readFrame(frameBuf, CHUNK_SAMPLES);
-        if (samplesRead == 0) { vTaskDelay(pdMS_TO_TICKS(1)); continue; }
+        if (samplesRead == 0) { 
+            // Cek timeout meskipun mic tidak mengirim data (I2S error)
+            if (!speechStarted && (millis() - startTime > initialTimeoutMs)) return 0;
+            if (speechStarted && (millis() - lastSpeechTime > silenceTimeoutMs)) return totalRecordedBytes;
+            
+            vTaskDelay(pdMS_TO_TICKS(1)); 
+            continue; 
+        }
 
         int64_t sumSquare = 0;
         for (size_t i = 0; i < samplesRead; i++) sumSquare += (int64_t)frameBuf[i] * frameBuf[i];
@@ -178,6 +188,9 @@ size_t AudioPipeline::recordVAD(int16_t *outBuffer, size_t maxBufSize,
         }
 
         if (millis() - lastSpeechTime > silenceTimeoutMs) break;
+
+        // Panggil callback tick agar display/sistem lain bisa update
+        if (tickCallback) tickCallback();
     }
 
     // Validasi akhir: buang kalau total durasi suara terlalu pendek (ketukan/noise sesaat)

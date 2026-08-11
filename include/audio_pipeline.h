@@ -6,6 +6,7 @@
 #pragma once
 #include <Arduino.h>
 #include <driver/i2s_std.h>
+#include <functional>
 #include "Audio.h"
 
 class AudioPipeline {
@@ -33,9 +34,13 @@ public:
      * @param maxBufSize Batas maksimal ukuran buffer
      * @param silenceTimeoutMs Durasi diam (ms) untuk memicu Auto-Stop setelah mulai bicara (default 1000ms)
      * @param initialTimeoutMs Durasi tunggu suara (ms) sebelum kembali ke Standby (default 3000ms)
+     * @param tickCallback Callback opsional dipanggil setiap iterasi chunk (untuk update display, dll)
      * @return size_t Ukuran byte yang berhasil direkam (0 jika timeout tanpa suara)
      */
-    size_t recordVAD(int16_t *outBuffer, size_t maxBufSize, uint16_t silenceTimeoutMs = 1000, uint16_t initialTimeoutMs = 3000);
+    size_t recordVAD(int16_t *outBuffer, size_t maxBufSize,
+                     uint16_t silenceTimeoutMs = 1000,
+                     uint16_t initialTimeoutMs = 3000,
+                     std::function<void()> tickCallback = nullptr);
 
     // Playback
     void speakText(const String &text, const char *lang = "id");

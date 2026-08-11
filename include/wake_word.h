@@ -8,6 +8,7 @@ public:
     WakeWordEngine(AudioPipeline &audio);
     bool begin();
     bool check();
+    void reset();  // Reset classifier state setelah interupsi (voice query, TTS, dll)
     float lastConfidence() const { return _lastConfidence; }
     bool isMuted() const { return _mutedUntil > millis(); }
 

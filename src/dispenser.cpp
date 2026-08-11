@@ -64,8 +64,8 @@ bool Dispenser::isMedicinePresent() {
     Serial.print(distance);
     Serial.print(" cm -> Status: ");
 
-    // Logika pengecekan obat: jika jarak > 3 cm maka "ada", jika <= 3 cm maka "tidak"
-    if (distance > 3) {
+    // Logika pengecekan obat: jika jarak > 5 cm maka "ada", jika <= 3 cm maka "tidak"
+    if (distance > 5) {
         Serial.println("ada");
         return true;  // Obat masih ada di tempat
     } else {

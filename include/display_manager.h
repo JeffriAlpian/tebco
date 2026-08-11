@@ -33,6 +33,8 @@ public:
     void showAIResponse(const String& text);
     void showListeningEyes();
     void showProcessingEyes();
+    void setIPAddress(const String& ip); // Tampilkan IP di pojok kanan bawah
+    void setListeningMode(bool active);  // Aktifkan/nonaktifkan mode listening (cegah auto-revert)
 
 private:
     TFT_eSPI _tft; 
@@ -51,7 +53,9 @@ private:
     unsigned long _nextBlinkInterval = 3000; 
     bool _isBlinking = false;
 
-    bool _showingText = false; 
+    bool _showingText = false;
+    bool _listeningMode = false;  // true saat VAD aktif, mencegah auto-revert ekspresi
+    String _ipAddress = "";  // Cache IP untuk ditampilkan di pojok bawah 
     void _drawWrappedText(const String &text, int16_t x, int16_t y, int16_t maxWidth, int16_t lineHeight);
     void renderFace(const FaceState& state);
     void drawThickBezier(int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t x2, int16_t y2, int16_t thickness);

@@ -23,10 +23,13 @@
  * Copyright (c) 2025 TEBCO Project. MIT License.
  */
 
+ 
+
 // ── System Headers ────────────────────────────────────────────────────────────
 #include <Arduino.h>
 #include <time.h>
 #include <ESP32PWM.h> // Untuk alokasi LEDC timer manual (cegah konflik dengan I2S)
+#include <WebServer.h> // Tambahan untuk Standby Web Server
 // #include <battery_monitor.h>
 
 // ── Project Modules ───────────────────────────────────────────────────────────
@@ -60,6 +63,10 @@ String currentPatientId = ""; // "" = no patient assigned
 String deviceAlias = "";
 String deviceId = "";
 
+// ── Web Server Standby ──
+WebServer standbyServer(80);
+bool manualTrigger = false;
+
 unsigned long lastSchedCheck = 0;
 unsigned long lastSchedFetch = 0;
 unsigned long lastHeartbeat = 0;
@@ -75,6 +82,32 @@ void pollPatientAssignment();
 void onPatientAssigned(const String &patientId);
 void onPatientUnassigned();
 
+// ── Standby Web Handlers ──
+void handleStandbyRoot() {
+    String html = R"rawliteral(
+<!DOCTYPE html><html lang="id"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TEBCO Dashboard</title>
+<style>
+  body{font-family:'Segoe UI',Arial,sans-serif;background:#0f0f1a;color:#eee;text-align:center;padding:40px;}
+  button{padding:20px 40px;background:linear-gradient(135deg,#0f9b8e,#0d7a72);color:#fff;
+         border:none;border-radius:12px;font-size:24px;cursor:pointer;font-weight:600;
+         box-shadow:0 8px 24px rgba(15,155,142,0.4);transition:transform 0.2s;}
+  button:active{transform:scale(0.95);}
+</style></head><body>
+  <h2>TEBCO Dashboard</h2>
+  <p style="color:#aaa;margin-bottom:40px">Tekan tombol di bawah untuk membangunkan TEBCO</p>
+  <button onclick="fetch('/listen').then(r=>console.log('OK'))">🎙️ Dengarkan</button>
+</body></html>
+)rawliteral";
+    standbyServer.send(200, "text/html", html);
+}
+
+void handleStandbyListen() {
+    manualTrigger = true;
+    standbyServer.send(200, "text/plain", "Listening");
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // Cache nilai terakhir supaya bisa dibaca fungsi lain (mis. untuk log tegangan)
@@ -83,62 +116,8 @@ static float g_lastBatVoltage = 0.0f;
 
 int getBatteryPercentage()
 {
-    const int TOTAL_SAMPLES = 64;
-    int validSamples[TOTAL_SAMPLES];
-    int validCount = 0;
-
-    for (int i = 0; i < TOTAL_SAMPLES; i++)
-    {
-        int val = analogRead(PIN_BATTERY_ADC);
-        if (val > 10 && val < 3300)
-        {
-            validSamples[validCount++] = val;
-        }
-        delayMicroseconds(200);
-    }
-
-    if (validCount == 0)
-    {
-        Serial.println("[BATT] ⚠️ Tidak ada sampel ADC valid, cek koneksi baterai/divider.");
-        return 0;
-    }
-
-    for (int i = 0; i < validCount - 1; i++)
-    {
-        for (int j = i + 1; j < validCount; j++)
-        {
-            if (validSamples[i] > validSamples[j])
-            {
-                int temp = validSamples[i];
-                validSamples[i] = validSamples[j];
-                validSamples[j] = temp;
-            }
-        }
-    }
-
-    // Ambil median lalu rata-ratakan beberapa nilai di sekitarnya (buang outlier)
-    int mid = validCount / 2;
-    int start = max(0, mid - 5);
-    int end = min(validCount, mid + 5);
-    long sum = 0;
-    for (int i = start; i < end; i++)
-    {
-        sum += validSamples[i];
-    }
-    float rawAvg_mV = (float)sum / (end - start);
-
-    // Konversi: rawAvg sudah dalam mV -> ke Volt -> kalikan divider ratio
-    float pinVoltage = rawAvg_mV / 1000.0f;
-    float batVoltage = pinVoltage * BATT_DIVIDER_RATIO;
-    float batPercent = (batVoltage - BATT_VOLT_EMPTY) / (BATT_VOLT_FULL - BATT_VOLT_EMPTY) * 100.0f;
-    if (batPercent > 100.0f)
-        batPercent = 100.0f;
-    if (batPercent < 0.0f)
-        batPercent = 0.0f;
-
-    int pct = (int)batPercent;
-
-    return pct;
+    // Mode tanpa baterai (colok listrik/USB langsung)
+    return 100;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -202,6 +181,19 @@ void setup()
     {
         Serial.println("[MAIN] Wi-Fi failed.");
         return;
+    }
+
+    // Mulai Standby Server jika terkoneksi Wi-Fi
+    if (WiFi.status() == WL_CONNECTED) {
+        standbyServer.on("/", HTTP_GET, handleStandbyRoot);
+        standbyServer.on("/listen", HTTP_GET, handleStandbyListen);
+        standbyServer.begin();
+        Serial.println("[MAIN] Standby Web Server started on port 80");
+
+        // Tampilkan IP di pojok kanan bawah layar
+        String localIP = WiFi.localIP().toString();
+        display.setIPAddress(localIP);
+        Serial.printf("[MAIN] IP ditampilkan di layar: %s\n", localIP.c_str());
     }
 
     // ── NTP Time Sync ──
@@ -294,25 +286,37 @@ void loop()
         handleRFIDTap();
     }
 
-    // 6. DEBUGGING SERIAL MONITOR
+    // 6. WEB SERVER HANDLE
+    if (WiFi.status() == WL_CONNECTED) {
+        standbyServer.handleClient();
+    }
+
+    // 7. DEBUGGING SERIAL MONITOR & MANUAL TRIGGER
     if (Serial.available())
     {
         char c = Serial.read();
         if (c == 'r' || c == 'R')
         {
-            Serial.println("\n[DEBUG] Manual 'r' received! Triggering voice query...");
-            if (profileLoaded)
-            {
-                display.setExpression(FaceExpression::SURPRISED);
-                audio.playTone(1000, 300);
+            manualTrigger = true;
+        }
+    }
 
-                handleVoiceQuery();
-                display.setExpression(FaceExpression::NEUTRAL);
-            }
-            else
-            {
-                Serial.println("[DEBUG] Patient belum di-load, tidak bisa trigger AI.");
-            }
+    if (manualTrigger)
+    {
+        manualTrigger = false;
+        Serial.println("\n[DEBUG] Manual / Virtual button triggered! Triggering voice query...");
+        if (profileLoaded)
+        {
+            display.setExpression(FaceExpression::SURPRISED);
+            audio.playTone(1000, 300);
+
+            handleVoiceQuery();
+            wakeWord.reset();  // ← Reset classifier setelah voice query
+            display.setExpression(FaceExpression::NEUTRAL);
+        }
+        else
+        {
+            Serial.println("[DEBUG] Patient belum di-load, tidak bisa trigger AI.");
         }
     }
 
@@ -567,6 +571,7 @@ void checkWakeWord()
         display.setExpression(FaceExpression::SURPRISED);
         audio.playTone(1000, 300); // Beep konfirmasi
         handleVoiceQuery();
+        wakeWord.reset();  // ← KRITIS: Reset classifier setelah voice query
         display.setExpression(FaceExpression::NEUTRAL);
     }
 }

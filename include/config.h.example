@@ -129,20 +129,20 @@
 // ─────────────────────────────────────────────
 //  FIREBASE CONFIG
 // ─────────────────────────────────────────────
-#define FIREBASE_HOST      "tebco-9e7a6-default-rtdb.asia-southeast1.firebasedatabase.app"
-#define FIREBASE_AUTH      "FKic265uaJqjTc19MjrL430nU6O9vsIZt4XIEr62"
+#define FIREBASE_HOST      "xxxxxx.firebasedatabase.app"
+#define FIREBASE_AUTH      "FKxxxxxx"
 
 // ─────────────────────────────────────────────
 //  WHATSAPP GATEWAY
 // ─────────────────────────────────────────────
 #define WA_API_URL         "https://api.sidobe.com/wa/v1/send-message"
-#define WA_SECRET_KEY      "rnwPvomARUXEnfIXfYswZSlvtwaIIIQLYOEoLttOBcXZTjaEsG"
+#define WA_SECRET_KEY      "xxxxxx"
 
 // ─────────────────────────────────────────────
 //  AI VOICE QUERY (n8n Webhook)
 // ─────────────────────────────────────────────
-#define AI_VOICE_QUERY_URL  "https://.onepedia.my.id/webhook/tebco-voice-query"
-#define AI_WEBHOOK_SECRET   "rahasia-tebco-123"
+#define AI_VOICE_QUERY_URL  "https://api-tebco.onepedia.my.id/webhook/tebco-voice-query"
+#define AI_WEBHOOK_SECRET   "xxxxx"
 
 // ─────────────────────────────────────────────
 //  WAKE WORD CONFIGURATION (Tuned)

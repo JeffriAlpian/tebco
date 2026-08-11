@@ -174,7 +174,8 @@ void DisplayManager::update()
     unsigned long now = millis();
 
     // ── Auto-Revert: Kembali ke HAPPY setelah 5 detik ekspresi non-HAPPY ──
-    if (!_showingText && _currentExpr != FaceExpression::HAPPY)
+    // SKIP jika sedang dalam mode listening (VAD aktif) agar wajah tidak hilang
+    if (!_showingText && !_listeningMode && _currentExpr != FaceExpression::HAPPY)
     {
         if (now - _lastFaceChangeTime >= 5000)
         {
@@ -356,6 +357,33 @@ void DisplayManager::drawStatusBar(int batteryPct, bool isConnected)
     {
         _tft.drawCircleHelper(x, y, 6, 3, COLOR_OFF);
     }
+
+    // Tampilkan IP address di pojok kanan bawah (kecil)
+    if (_ipAddress.length() > 0)
+    {
+        _tft.setTextFont(1);        // Font bawaan terkecil TFT_eSPI (~6x8px)
+        _tft.setTextSize(1);
+        _tft.setTextColor(COLOR_OFF, COLOR_BG); // Abu-abu gelap, tidak mencolok
+        int16_t ipW = _tft.textWidth(_ipAddress);
+        _tft.setCursor(240 - ipW - 4, 240 - 12); // Pojok kanan bawah, margin 4px
+        _tft.print(_ipAddress);
+    }
+}
+
+void DisplayManager::setIPAddress(const String &ip)
+{
+    _ipAddress = ip;
+    // Langsung render ulang area bawah
+    if (_ipAddress.length() > 0)
+    {
+        _tft.fillRect(0, 228, 240, 12, COLOR_BG); // Bersihkan baris bawah (240 - 12)
+        _tft.setTextFont(1);
+        _tft.setTextSize(1);
+        _tft.setTextColor(COLOR_OFF, COLOR_BG);
+        int16_t ipW = _tft.textWidth(_ipAddress);
+        _tft.setCursor(240 - ipW - 4, 240 - 12);
+        _tft.print(_ipAddress);
+    }
 }
 
 // Gunakan fungsi ini dengan Stateful Timer dari TEBCO.ino (Setiap 10 detik)
@@ -364,11 +392,32 @@ void DisplayManager::updateStatusIcons(int batteryPct, bool isConnected)
     static int lastBattery = -1;
     static bool lastWifi = false;
 
+    // Selalu gambar ulang jika ada IP baru, atau jika status berubah
     if (batteryPct != lastBattery || isConnected != lastWifi)
     {
         drawStatusBar(batteryPct, isConnected);
         lastBattery = batteryPct;
         lastWifi = isConnected;
+    }
+    else if (_ipAddress.length() > 0)
+    {
+        // Pastikan IP tetap terlihat meskipun status baterai/WiFi tidak berubah
+        _tft.setTextFont(1);
+        _tft.setTextSize(1);
+        _tft.setTextColor(COLOR_OFF, COLOR_BG);
+        int16_t ipW = _tft.textWidth(_ipAddress);
+        _tft.setCursor(240 - ipW - 4, 240 - 12);
+        _tft.print(_ipAddress);
+    }
+}
+
+void DisplayManager::setListeningMode(bool active)
+{
+    _listeningMode = active;
+    if (active)
+    {
+        // Reset timer agar auto-revert tidak langsung terpicu
+        _lastFaceChangeTime = millis();
     }
 }
 
