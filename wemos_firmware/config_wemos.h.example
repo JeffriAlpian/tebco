@@ -10,14 +10,14 @@
 // ─────────────────────────────────────────────
 //  FIREBASE CONFIG (sama dengan ESP32-S3)
 // ─────────────────────────────────────────────
-#define FIREBASE_HOST   "tebco-9e7a6-default-rtdb.asia-southeast1.firebasedatabase.app"
-#define FIREBASE_AUTH   "FKic265uaJqjTc19MjrL430nU6O9vsIZt4XIEr62"
+#define FIREBASE_HOST   "xxxxx.firebasedatabase.app"
+#define FIREBASE_AUTH   "FKxxxxxx"
 
 // ─────────────────────────────────────────────
 //  WHATSAPP GATEWAY (sama dengan ESP32-S3)
 // ─────────────────────────────────────────────
 #define WA_API_URL      "https://api.sidobe.com/wa/v1/send-message"
-#define WA_SECRET_KEY   "rnwPvomARUXEnfIXfYswZSlvtwaIIIQLYOEoLttOBcXZTjaEsG"
+#define WA_SECRET_KEY   "xxxxxxx"
 
 // ─────────────────────────────────────────────
 //  DEVICE IDENTITY
