@@ -1,0 +1,79 @@
+/**
+ * @file config_wemos.h
+ * @brief Konfigurasi Wemos D1 Mini – Dispenser & RFID Controller TEBCO
+ *
+ * Edit bagian CREDENTIALS dengan data Anda sebelum upload.
+ */
+
+#pragma once
+
+// ─────────────────────────────────────────────
+//  FIREBASE CONFIG (sama dengan ESP32-S3)
+// ─────────────────────────────────────────────
+#define FIREBASE_HOST   "tebco-9e7a6-default-rtdb.asia-southeast1.firebasedatabase.app"
+#define FIREBASE_AUTH   "FKic265uaJqjTc19MjrL430nU6O9vsIZt4XIEr62"
+
+// ─────────────────────────────────────────────
+//  WHATSAPP GATEWAY (sama dengan ESP32-S3)
+// ─────────────────────────────────────────────
+#define WA_API_URL      "https://api.sidobe.com/wa/v1/send-message"
+#define WA_SECRET_KEY   "rnwPvomARUXEnfIXfYswZSlvtwaIIIQLYOEoLttOBcXZTjaEsG"
+
+// ─────────────────────────────────────────────
+//  DEVICE IDENTITY
+// ─────────────────────────────────────────────
+#define WEMOS_DEVICE_NAME  "TEBCO-WEMOS"
+
+// ─────────────────────────────────────────────
+//  PIN MAPPING – Wemos D1 Mini (ESP8266)
+// ─────────────────────────────────────────────
+
+// --- RFID MFRC522 (SPI) ---
+// D5=SCK, D6=MISO, D7=MOSI, D8=SS, D3=RST
+#define PIN_RFID_SCK    14  // D5
+#define PIN_RFID_MISO   12  // D6
+#define PIN_RFID_MOSI   13  // D7
+#define PIN_RFID_SS     15  // D8
+#define PIN_RFID_RST     0  // D3
+
+// --- Servo SG90 ---
+#define PIN_SERVO_1      5  // D1 (Slot 1)
+#define PIN_SERVO_2      4  // D2 (Slot 2, opsional)
+
+// --- Sensor Jarak / IR ---
+// Gunakan GPIO2 (D4) untuk sensor deteksi obat diambil
+#define PIN_SENSOR_IR    2  // D4 (Active LOW: LOW = obat ada)
+
+// --- UART ke ESP32-S3 ---
+// Wemos D1 Mini: TX=GPIO1(TXD), RX=GPIO3(RXD) = UART0 hardware default
+// PENTING: Serial UART0 dipakai untuk komunikasi ke ESP32-S3.
+//          Karena itu, Serial.print() untuk debug TIDAK akan muncul
+//          saat kabel UART tersambung (akan mengganggu komunikasi).
+//          Gunakan Serial.swap() atau matikan debug log saat produksi.
+#define UART_BAUD_RATE  115200
+
+// ─────────────────────────────────────────────
+//  RFID - Allowed UID (sama dengan ESP32-S3)
+// ─────────────────────────────────────────────
+#define RFID_ALLOWED_UID {0x61, 0x47, 0x17, 0x17}
+#define RFID_UID_LEN      4
+
+// ─────────────────────────────────────────────
+//  SERVO ANGLES
+// ─────────────────────────────────────────────
+#define SERVO_LOCKED_DEG  0
+#define SERVO_OPEN_DEG   45
+
+// ─────────────────────────────────────────────
+//  TIMING
+// ─────────────────────────────────────────────
+#define SCHEDULE_CHECK_INTERVAL_MS  30000  // Cek jadwal tiap 30 detik
+#define ASSIGNMENT_POLL_MS          15000  // Cek assignment pasien tiap 15 detik
+#define HEARTBEAT_INTERVAL_MS       60000  // Heartbeat tiap 1 menit
+#define MISSED_DOSE_WINDOW_MIN      30     // Dosis dianggap "Bolos" setelah 30 menit
+
+// ─────────────────────────────────────────────
+//  NTP
+// ─────────────────────────────────────────────
+#define NTP_SERVER      "pool.ntp.org"
+#define GMT_OFFSET_SEC  25200   // WIB = UTC+7
