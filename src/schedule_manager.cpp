@@ -106,3 +106,15 @@ String ScheduleManager::getNextScheduleTime() {
     }
     return next;
 }
+
+String ScheduleManager::getSchedulesAsJson() const {
+    String json = "[";
+    bool first = true;
+    for (const auto &s : _schedules) {
+        if (!first) json += ",";
+        json += "{\"time\":\"" + s.timeHHMM + "\",\"qty\":" + String(s.qty_servo1 + s.qty_servo2) + "}";
+        first = false;
+    }
+    json += "]";
+    return json;
+}

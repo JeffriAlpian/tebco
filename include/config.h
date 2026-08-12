@@ -141,7 +141,7 @@
 // ─────────────────────────────────────────────
 //  AI VOICE QUERY (n8n Webhook)
 // ─────────────────────────────────────────────
-#define AI_VOICE_QUERY_URL  "https://.onepedia.my.id/webhook/tebco-voice-query"
+#define AI_VOICE_QUERY_URL  "https://api-tebco.onepedia.my.id/webhook/tebco-voice-query"
 #define AI_WEBHOOK_SECRET   "rahasia-tebco-123"
 
 // ─────────────────────────────────────────────

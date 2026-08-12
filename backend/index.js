@@ -1,138 +1,141 @@
 require('dotenv').config();
+const path = require('path');
 const express = require('express');
-const axios = require('axios');
-const FormData = require('form-data');
+const cors = require('cors');
+const OpenAI = require('openai');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Initialize Gemini
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+// Izinkan akses dari browser (untuk file test.html)
+app.use(cors());
 
-// Middleware to parse raw binary data for our webhook
-app.use('/webhook/tebco-voice-query', express.raw({ 
-    type: 'application/octet-stream', 
-    limit: '10mb' 
-}));
+// Sajikan file test.html langsung dari server ini
+app.use(express.static(path.join(__dirname)));
 
-// Rute GET sederhana untuk mengecek status server via Browser
-app.get('/', (req, res) => {
-    res.send('<h1>TEBCO AI Backend is Running 🚀</h1><p>Status: OK. Ready to receive voice queries from ESP32.</p>');
+// ── Inisialisasi Client AI ────────────────────────────────────────────────────
+
+// Groq Client (menggunakan OpenAI SDK, cukup ganti baseURL ke Groq)
+const groq = new OpenAI({
+    apiKey: process.env.GROQ_API_KEY,
+    baseURL: 'https://api.groq.com/openai/v1',
 });
 
-// Helper: Create 44-byte WAV header for 16kHz, 16-bit, Mono PCM
+// Gemini Client
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const gemini = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
+
+// ── Middleware ────────────────────────────────────────────────────────────────
+
+// Tangkap kiriman biner (audio PCM) dari ESP32 / test.html
+app.use('/webhook/tebco-voice-query', express.raw({
+    type: 'application/octet-stream',
+    limit: '10mb'
+}));
+
+// ── Rute Status (Cek via Browser) ────────────────────────────────────────────
+app.get('/', (req, res) => {
+    res.send('<h1>TEBCO AI Backend is Running 🚀</h1><p>Status: OK</p>');
+});
+
+// ── Helper: Buat 44-byte WAV Header ──────────────────────────────────────────
 function createWavHeader(dataLength, sampleRate) {
-    const buffer = Buffer.alloc(44);
-    buffer.write('RIFF', 0);
-    buffer.writeUInt32LE(36 + dataLength, 4);
-    buffer.write('WAVE', 8);
-    buffer.write('fmt ', 12);
-    buffer.writeUInt32LE(16, 16); 
-    buffer.writeUInt16LE(1, 20);  
-    buffer.writeUInt16LE(1, 22);  
-    buffer.writeUInt32LE(sampleRate, 24); 
-    buffer.writeUInt32LE(sampleRate * 2, 28); 
-    buffer.writeUInt16LE(2, 32);  
-    buffer.writeUInt16LE(16, 34); 
-    buffer.write('data', 36);
-    buffer.writeUInt32LE(dataLength, 40);
-    return buffer;
+    const buf = Buffer.alloc(44);
+    buf.write('RIFF', 0);
+    buf.writeUInt32LE(36 + dataLength, 4);
+    buf.write('WAVE', 8);
+    buf.write('fmt ', 12);
+    buf.writeUInt32LE(16, 16);
+    buf.writeUInt16LE(1, 20);   // PCM format
+    buf.writeUInt16LE(1, 22);   // Mono
+    buf.writeUInt32LE(sampleRate, 24);
+    buf.writeUInt32LE(sampleRate * 2, 28);
+    buf.writeUInt16LE(2, 32);
+    buf.writeUInt16LE(16, 34);  // 16-bit
+    buf.write('data', 36);
+    buf.writeUInt32LE(dataLength, 40);
+    return buf;
 }
 
-// System prompt for Gemini
-const SYSTEM_PROMPT = `Anda adalah TEBCO (Asisten Pengingat Obat AI). 
-Tugas Anda menemani pasien TBC. Jawablah dengan singkat, sopan, empati, dan ramah. 
-Jangan menggunakan pemformatan markdown (*, #) karena jawaban Anda akan dibaca oleh Text-to-Speech.`;
+// ── System Prompt Gemini ──────────────────────────────────────────────────────
+const SYSTEM_PROMPT = `Anda adalah TEBCO, Asisten Pengingat Obat berbasis AI. 
+Tugas Anda adalah menemani dan membantu pasien. Jawablah dengan singkat, hangat, dan empati.
+Jangan gunakan simbol markdown seperti * atau # karena jawaban Anda akan dibacakan oleh Text-to-Speech.`;
 
+// ── Endpoint Utama: Menerima Audio dari ESP32 / Browser ──────────────────────
 app.post('/webhook/tebco-voice-query', async (req, res) => {
     try {
-        // 1. Authenticate Request
+        // 1. Autentikasi
         const authHeader = req.headers['authorization'];
         if (authHeader !== `Bearer ${process.env.TEBCO_SECRET}`) {
-            return res.status(401).send('Unauthorized');
+            return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        // 2. Extract Metadata from Headers
-        const patientId = req.headers['x-patient-id'] || 'Unknown';
-        const userGreeting = req.headers['x-user-greeting'] || 'Halo';
-        const disease = req.headers['x-disease'] || 'Umum';
-        const sampleRate = parseInt(req.headers['x-sample-rate']) || 16000;
+        // 2. Ambil Metadata dari Headers
+        const patientId   = req.headers['x-patient-id']     || 'Unknown';
+        const userGreeting= req.headers['x-user-greeting']  || 'Halo';
+        const disease     = req.headers['x-disease']        || 'Umum';
+        const sampleRate  = parseInt(req.headers['x-sample-rate']) || 16000;
 
-        console.log(`[+] New Request from Patient: ${patientId} (Disease: ${disease})`);
+        console.log(`\n[+] Request masuk — Pasien: ${patientId} | Penyakit: ${disease}`);
 
-        // 3. Convert incoming raw PCM to WAV for Groq
+        // 3. Validasi data audio
         const pcmBuffer = req.body;
         if (!pcmBuffer || pcmBuffer.length === 0) {
-            return res.status(400).send('No audio data received');
+            return res.status(400).json({ error: 'Tidak ada data audio.' });
         }
 
-        const wavHeader = createWavHeader(pcmBuffer.length, sampleRate);
-        const wavBuffer = Buffer.concat([wavHeader, pcmBuffer]);
+        // 4. Sisipkan WAV Header ke data PCM mentah dari ESP32
+        const wavBuffer = Buffer.concat([createWavHeader(pcmBuffer.length, sampleRate), pcmBuffer]);
 
-        // 4. Send to Groq Whisper for Speech-to-Text (STT)
-        console.log('[-] Sending to Groq STT...');
-        const formData = new FormData();
-        formData.append('file', wavBuffer, { filename: 'audio.wav', contentType: 'audio/wav' });
-        formData.append('model', 'whisper-large-v3');
-        formData.append('language', 'id');
+        // ── LANGKAH 1: STT (Groq Whisper via OpenAI SDK) ─────────────────────
+        console.log('[-] Mengirim ke Groq Whisper STT...');
 
-        const groqRes = await axios.post('https://api.groq.com/openai/v1/audio/transcriptions', formData, {
-            headers: {
-                ...formData.getHeaders(),
-                'Authorization': `Bearer ${process.env.GROQ_API_KEY}`
-            }
+        // OpenAI SDK memerlukan objek File. Kita buat dari Buffer menggunakan Blob.
+        const audioFile = new File([wavBuffer], 'audio.wav', { type: 'audio/wav' });
+
+        const transcription = await groq.audio.transcriptions.create({
+            file: audioFile,
+            model: 'whisper-large-v3',
+            language: 'id',
         });
 
-        const transcript = groqRes.data.text;
-        console.log(`[>] User said: "${transcript}"`);
+        const transcript = transcription.text.trim();
+        console.log(`[>] Pengguna berkata: "${transcript}"`);
 
-        // 5. Send to Gemini for Logic (LLM)
-        console.log('[-] Thinking with Gemini...');
-        const prompt = `Pasien (ID: ${patientId}, Penyakit: ${disease}) berkata: "${transcript}". Berikan jawaban yang menenangkan dan sesuai konteks kesehatannya.`;
-        
-        const result = await model.generateContent({
+        if (!transcript) {
+            return res.json({ text: 'Maaf, saya tidak mendengar dengan jelas. Bisa diulangi?' });
+        }
+
+        // ── LANGKAH 2: LLM (Google Gemini) ───────────────────────────────────
+        console.log('[-] Berpikir dengan Gemini...');
+
+        const prompt = `Konteks — Pasien ID: ${patientId}, Sapaan: "${userGreeting}", Penyakit: ${disease}.
+Pertanyaan/Ucapan Pasien: "${transcript}"`;
+
+        const result = await gemini.generateContent({
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
             systemInstruction: { role: 'system', parts: [{ text: SYSTEM_PROMPT }] }
         });
-        
-        let aiResponseText = result.response.text().trim();
-        console.log(`[<] AI Answer: "${aiResponseText}"`);
 
-        // 6. Text-to-Speech (Google TTS / VoiceRSS)
-        console.log('[-] Generating TTS Audio...');
-        
-        // --- Contoh Menggunakan Google TTS Gratis (google-tts-api) ---
-        // Karena ESP32 butuh audio mentah (PCM/WAV) dan API gratis Google TTS 
-        // mengembalikan MP3, Anda bisa menggantinya dengan VoiceRSS jika ESP32
-        // Anda belum mensupport MP3 decoding.
-        // Di sini kita contohkan memanggil VoiceRSS yang mendukung pengembalian 16kHz WAV.
-        
-        /* 
-        const ttsUrl = `http://api.voicerss.org/?key=${process.env.TTS_API_KEY}&hl=id-id&v=Budi&c=WAV&f=16khz_16bit_mono&src=${encodeURIComponent(aiResponseText)}`;
-        const ttsRes = await axios.get(ttsUrl, { responseType: 'arraybuffer' });
-        let finalAudioBuffer = ttsRes.data;
-        */
+        const aiText = result.response.text().trim();
+        console.log(`[<] Jawaban AI: "${aiText}"`);
 
-        // MOCKUP RESPON AUDIO SEMENTARA (jika belum ada TTS_API_KEY)
-        // Seharusnya finalAudioBuffer berisi byte array dari file WAV
-        // let finalAudioBuffer = Buffer.from(...);
-        
-        // Simulasikan pengembalian respons (Untuk sekarang kembalikan teks sebagai fallback 
-        // jika TTS belum diaktifkan, atau lempar error jika audio diwajibkan)
-        
-        // res.setHeader('Content-Type', 'audio/wav');
-        // res.send(finalAudioBuffer);
-
-        res.json({ text: aiResponseText }); // Fallback JSON text (sementara untuk testing backend)
+        // ── LANGKAH 3: Kembalikan Respons ─────────────────────────────────────
+        // Sementara: kembalikan teks (untuk testing)
+        // Nanti: ganti dengan audio WAV dari TTS
+        res.json({ text: aiText });
 
     } catch (error) {
-        console.error('[!] Error:', error?.response?.data || error.message);
-        res.status(500).send('Internal Server Error');
+        const errMsg = error?.error?.message || error?.message || 'Unknown error';
+        console.error(`[!] ERROR: ${errMsg}`);
+        res.status(500).json({ error: errMsg });
     }
 });
 
+// ── Jalankan Server ───────────────────────────────────────────────────────────
 app.listen(PORT, () => {
-    console.log(`🚀 TEBCO Backend running on http://localhost:${PORT}`);
+    console.log(`🚀 TEBCO Backend berjalan di http://localhost:${PORT}`);
+    console.log(`🧪 Halaman tes tersedia di http://localhost:${PORT}/test.html`);
 });

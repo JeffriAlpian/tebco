@@ -37,24 +37,22 @@
 #include "include/wifi_manager.h"
 #include "include/firebase_manager.h"
 #include "include/wa_gateway.h"
-#include "include/rfid_auth.h"
-#include "include/dispenser.h"
 #include "include/display_manager.h"
 #include "include/audio_pipeline.h"
 #include "include/ai_assistant.h"
 #include "include/schedule_manager.h"
 #include "include/wake_word.h"
+#include "include/uart_comm.h"   // ← Komunikasi ke Wemos D1 Mini
 
 // ── Global Subsystem Instances ────────────────────────────────────────────────
 WiFiManager wifiMgr;
 FirebaseManager firebase;
-RFIDAuth rfid;
-Dispenser dispenser;
 DisplayManager display;
 AudioPipeline audio;
 WakeWordEngine wakeWord(audio); // Edge Impulse KWS engine
 AIAssistant *aiAssistant = nullptr;
 ScheduleManager *schedMgr = nullptr;
+UartComm *uartComm = nullptr;   // ← UART ke Wemos D1 Mini
 
 // ── Application State ─────────────────────────────────────────────────────────
 UserProfile userProfile;
@@ -74,8 +72,6 @@ unsigned long lastAssignmentPoll = 0;
 
 // ── Forward Declarations ──────────────────────────────────────────────────────
 void handleScheduleCheck();
-void handleDispenserUpdate();
-void handleRFIDTap();
 void handleVoiceQuery();
 void checkWakeWord();
 void pollPatientAssignment();
@@ -170,17 +166,22 @@ void setup()
         display.setExpression(FaceExpression::SAD);
     }
 
-    // ── RFID ──
-    rfid.begin();
-
-    // ── Dispenser ──
-    dispenser.begin();
+    // ── UART ke Wemos D1 Mini ──
+    uartComm = new UartComm(display, audio);
+    uartComm->begin();
+    Serial.println("[MAIN] UART ke Wemos D1 Mini siap.");
 
     // ── Wi-Fi ──
     if (!wifiMgr.begin())
     {
         Serial.println("[MAIN] Wi-Fi failed.");
         return;
+    }
+
+    // Bagikan kredensial ke Wemos D1 Mini agar ia bisa konek secara mandiri
+    if (uartComm) {
+        // WiFi.SSID() dan WiFi.psk() mengembalikan string ssid dan password dari koneksi saat ini
+        uartComm->sendWifiCredentials(WiFi.SSID(), WiFi.psk());
     }
 
     // Mulai Standby Server jika terkoneksi Wi-Fi
@@ -244,7 +245,10 @@ void loop()
     display.update(); // Render animasi mata Mochi
     audio.loop();     // Streaming TTS Audio
 
-    // 2. PENGECEKAN WAKE WORD (Harus secepat dan semulus mungkin)
+    // 2.5. PROSES PESAN UART DARI WEMOS D1 MINI
+    if (uartComm) uartComm->loop();
+
+    // 3. PENGECEKAN WAKE WORD (Harus secepat dan semulus mungkin)
     checkWakeWord();
 
     // 3. POLL PATIENT ASSIGNMENT (Default: 15 Detik sekali)
@@ -274,16 +278,7 @@ void loop()
                 schedMgr->refresh();
         }
 
-        // ── Schedule Evaluation (Tiap 30 Detik sekali) ──
-        if (now - lastSchedCheck >= SCHEDULE_CHECK_INTERVAL_MS || lastSchedCheck == 0)
-        {
-            lastSchedCheck = now;
-            handleScheduleCheck();
-        }
 
-        // ── State Machine Dispenser & RFID ──
-        handleDispenserUpdate();
-        handleRFIDTap();
     }
 
     // 6. WEB SERVER HANDLE
@@ -373,6 +368,22 @@ void onPatientAssigned(const String &patientId)
 
     firebase.updateDeviceStatus(getBatteryPercentage(), "online");
     Serial.printf("[MAIN] Patient '%s' loaded. System active.\n", patientId.c_str());
+
+    // ── Teruskan Data Pasien ke Wemos D1 Mini via UART ──
+    if (uartComm) {
+        uartComm->sendPatientUpdate(
+            patientId,
+            userProfile.name,
+            userProfile.disease,
+            userProfile.waNumber
+        );
+        // Teruskan juga jadwal dalam format JSON array
+        if (schedMgr) {
+            String schedJson = schedMgr->getSchedulesAsJson();
+            if (schedJson.length() > 2)
+                uartComm->sendScheduleUpdate(schedJson);
+        }
+    }
 }
 
 void onPatientUnassigned()
@@ -397,145 +408,8 @@ void onPatientUnassigned()
     Serial.println("[MAIN] Device is now idle. No patient assigned.");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  HANDLER: Schedule Check
-// ─────────────────────────────────────────────────────────────────────────────
-void handleScheduleCheck()
-{
-    if (!schedMgr || !profileLoaded)
-        return;
+// (RFID, Dispenser, dan Schedule Check kini ditangani oleh Wemos D1 Mini)
 
-    MedSchedule matched;
-    ScheduleCondition cond = schedMgr->evaluate(matched);
-
-    if (cond == ScheduleCondition::ON_SCHEDULE)
-    {
-        Serial.printf("[MAIN] Schedule triggered: %s\n", matched.timeHHMM.c_str());
-        WAGateway::sendMedicineReminder(userProfile.greeting, userProfile.waNumber);
-    }
-    else if (cond == ScheduleCondition::MISSED)
-    {
-        Serial.printf("[MAIN] MISSED dose: %s\n", matched.id.c_str());
-        if (dispenser.isMedicinePresent())
-        {
-            schedMgr->markBolos(matched.id);
-            WAGateway::sendMissedDoseAlert(userProfile.greeting, userProfile.waNumber);
-            display.setExpression(FaceExpression::SAD);
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  HANDLER: RFID Tap
-// ─────────────────────────────────────────────────────────────────────────────
-void handleRFIDTap()
-{
-    RFIDStatus status = rfid.scanStatus();
-
-    if (status == RFIDStatus::NO_CARD)
-        return;
-
-    if (status == RFIDStatus::DENIED)
-    {
-        Serial.println("[MAIN] Unauthorized RFID scan detected.");
-        display.setExpression(FaceExpression::ANGRY);
-        audio.playTone(300, 500);
-
-        unsigned long startWait = millis();
-        while (millis() - startWait < 2000)
-        {
-            display.update();
-            delay(10);
-        }
-
-        display.setExpression(FaceExpression::NEUTRAL);
-        return;
-    }
-
-    if (!schedMgr || !profileLoaded)
-        return;
-
-    Serial.println("[MAIN] Authorised RFID scan detected.");
-
-    MedSchedule matched;
-    ScheduleCondition cond = schedMgr->evaluate(matched);
-
-    if (cond == ScheduleCondition::ON_SCHEDULE)
-    {
-        Serial.println("[MAIN] CONDITION A: Opening dispenser.");
-        dispenser.openDispenser(matched.qty_servo1, matched.qty_servo2);
-        display.setExpression(FaceExpression::HAPPY);
-        firebase.updateDeviceStatus(getBatteryPercentage(), "dispensing");
-        Serial.printf("[MAIN] Membuka: Obat A=%d pil, Obat B=%d pil\n",
-                      matched.qty_servo1, matched.qty_servo2);
-    }
-    else
-    {
-        Serial.println("[MAIN] CONDITION B: Access denied – outside schedule.");
-        dispenser.denyAccess();
-        display.setExpression(FaceExpression::SAD);
-
-        String ttsText = "Maaf " + userProfile.greeting + ", belum waktunya minum obat.";
-        Serial.println("[MAIN] Memutar TTS: " + ttsText);
-        audio.speakText(ttsText, "id");
-    }
-
-    delay(200);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  HANDLER: Dispenser Update
-// ─────────────────────────────────────────────────────────────────────────────
-void handleDispenserUpdate()
-{
-    int dispStatus = dispenser.update();
-
-    if (dispStatus == 1 && schedMgr)
-    {
-        MedSchedule matched;
-        ScheduleCondition cond = schedMgr->evaluate(matched);
-
-        if (cond == ScheduleCondition::ON_SCHEDULE || cond == ScheduleCondition::MISSED)
-        {
-            Serial.printf("[MAIN] Marking %s as Tuntas.\n", matched.id.c_str());
-            schedMgr->markTuntas(matched.id);
-
-            userProfile.stock_servo1 = max(0, userProfile.stock_servo1 - matched.qty_servo1);
-            userProfile.stock_servo2 = max(0, userProfile.stock_servo2 - matched.qty_servo2);
-
-            firebase.updatePatientStock(currentPatientId, userProfile.stock_servo1, userProfile.stock_servo2);
-
-            if (userProfile.stock_servo1 <= userProfile.stock_threshold && matched.qty_servo1 > 0)
-            {
-                WAGateway::sendLowStockAlert(userProfile.greeting, userProfile.waNumber, "Obat A", userProfile.stock_servo1);
-            }
-            if (userProfile.stock_servo2 <= userProfile.stock_threshold && matched.qty_servo2 > 0)
-            {
-                WAGateway::sendLowStockAlert(userProfile.greeting, userProfile.waNumber, "Obat B", userProfile.stock_servo2);
-            }
-
-            display.setExpression(FaceExpression::WINK);
-            firebase.updateDeviceStatus(getBatteryPercentage(), "online");
-            delay(3000);
-            display.setExpression(FaceExpression::NEUTRAL);
-        }
-    }
-    else if (dispStatus == 2 && schedMgr)
-    {
-        MedSchedule matched;
-        ScheduleCondition cond = schedMgr->evaluate(matched);
-
-        if (cond == ScheduleCondition::ON_SCHEDULE || cond == ScheduleCondition::MISSED)
-        {
-            Serial.printf("[MAIN] 3 menit berlalu. Marking %s as Bolos.\n", matched.id.c_str());
-            schedMgr->markBolos(matched.id);
-            WAGateway::sendMissedDoseAlert(userProfile.greeting, userProfile.waNumber);
-
-            display.setExpression(FaceExpression::SAD);
-            firebase.updateDeviceStatus(getBatteryPercentage(), "online");
-        }
-    }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  HANDLER: Voice Query

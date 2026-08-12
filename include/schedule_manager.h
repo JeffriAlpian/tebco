@@ -49,6 +49,9 @@ public:
     /** @brief Returns HH:MM of the next pending schedule, or "--:--" if none. */
     String getNextScheduleTime();
 
+    /** @brief Returns schedules as a JSON array string. */
+    String getSchedulesAsJson() const;
+
     const std::vector<MedSchedule> &getSchedules() const { return _schedules; }
 
 private:

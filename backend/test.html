@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tester AI TEBCO</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 40px auto; text-align: center; background: #f0f2f5; }
+        .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        button { padding: 15px 30px; font-size: 18px; border: none; border-radius: 50px; cursor: pointer; transition: 0.3s; color: white; font-weight: bold; }
+        .btn-start { background-color: #2563eb; }
+        .btn-start:hover { background-color: #1d4ed8; }
+        .btn-recording { background-color: #dc2626; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+        #log { margin-top: 20px; padding: 15px; background: #1e293b; color: #10b981; border-radius: 8px; text-align: left; min-height: 100px; font-family: monospace; overflow-y: auto; white-space: pre-wrap; }
+        #responseBox { margin-top: 20px; padding: 20px; border-left: 5px solid #3b82f6; background: #eff6ff; text-align: left; font-size: 18px; display: none; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2>🧪 Tester TEBCO Backend</h2>
+    <p>Gunakan mic laptop Anda untuk mengirim audio (berformat raw PCM) ke server Node.js layaknya ESP32.</p>
+    
+    <button id="recordBtn" class="btn-start">🎤 Mulai Rekam (3 Detik)</button>
+    
+    <div id="responseBox">
+        <strong>🤖 Jawaban AI:</strong>
+        <p id="aiText">Menunggu...</p>
+    </div>
+
+    <div id="log">Log sistem akan muncul di sini...</div>
+</div>
+
+<script>
+    const recordBtn = document.getElementById('recordBtn');
+    const logEl = document.getElementById('log');
+    const responseBox = document.getElementById('responseBox');
+    const aiText = document.getElementById('aiText');
+    
+    // Auto-detect URL: jika dibuka dari port 3000 pakai relative path,
+    // jika dari Live Server / file:// pakai absolute URL ke localhost:3000
+    const BASE = (window.location.port === '3000' && window.location.protocol !== 'file:')
+        ? ''
+        : 'http://localhost:3000';
+    const BACKEND_URL = BASE + '/webhook/tebco-voice-query';
+
+    function log(msg) {
+        logEl.innerHTML += `\n[${new Date().toLocaleTimeString()}] ${msg}`;
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    recordBtn.addEventListener('click', async () => {
+        try {
+            log("Meminta akses mikrofon...");
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            
+            log("Merekam audio (16kHz PCM) selama 3 detik...");
+            recordBtn.innerText = "Merekam...";
+            recordBtn.className = "btn-recording";
+            responseBox.style.display = "none";
+
+            // Konversi Audio ke Raw PCM (16kHz, 16-bit, Mono) persis seperti output ESP32 I2S
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+            const source = audioContext.createMediaStreamSource(stream);
+            const processor = audioContext.createScriptProcessor(4096, 1, 1);
+            
+            let pcmData = [];
+            
+            processor.onaudioprocess = (e) => {
+                const input = e.inputBuffer.getChannelData(0);
+                for (let i = 0; i < input.length; i++) {
+                    let s = Math.max(-1, Math.min(1, input[i]));
+                    pcmData.push(s < 0 ? s * 0x8000 : s * 0x7FFF);
+                }
+            };
+            
+            source.connect(processor);
+            processor.connect(audioContext.destination);
+
+            // Berhenti merekam setelah 3 detik
+            setTimeout(async () => {
+                processor.disconnect();
+                source.disconnect();
+                stream.getTracks().forEach(track => track.stop());
+                audioContext.close();
+                
+                recordBtn.innerText = "Sedang Memproses AI...";
+                recordBtn.className = "btn-start";
+                recordBtn.style.opacity = "0.5";
+                recordBtn.disabled = true;
+
+                const pcmBuffer = new Int16Array(pcmData);
+                log(`Selesai merekam. Mengirim ${pcmBuffer.byteLength} bytes ke Backend...`);
+
+                try {
+                    const response = await fetch(BACKEND_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': 'Bearer rahasia-tebco-123',
+                            'Content-Type': 'application/octet-stream',
+                            'X-Patient-Id': 'HTML-Tester',
+                            'X-User-Greeting': 'Halo',
+                            'X-Disease': 'Pengujian Sistem',
+                            'X-Sample-Rate': '16000'
+                        },
+                        body: pcmBuffer
+                    });
+
+                    if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+                    
+                    const result = await response.json();
+                    
+                    log(`Sukses! AI membalas.`);
+                    responseBox.style.display = "block";
+                    aiText.innerText = result.text;
+                    
+                } catch (err) {
+                    log("GAGAL: " + err.message);
+                } finally {
+                    recordBtn.innerText = "🎤 Mulai Rekam (3 Detik)";
+                    recordBtn.style.opacity = "1";
+                    recordBtn.disabled = false;
+                }
+
+            }, 3000);
+
+        } catch (err) {
+            log("Error Mikrofon: " + err.message);
+        }
+    });
+</script>
+
+</body>
+</html>
